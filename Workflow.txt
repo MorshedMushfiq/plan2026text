@@ -1,0 +1,17 @@
+You push code to main
+        │
+        ▼
+GitHub Actions triggers
+        │
+        ├── Build backend (npm install → prisma generate → nest build)
+        ├── Build frontend (npm install → next build)
+        ├── Upload artifacts via SCP to server
+        │   ├── backend/ (dist, package.json, prisma, etc.)
+        │   ├── frontend/ (.next, package.json, server.js, etc.)
+        │   └── ecosystem.config.js + deploy.sh
+        ├── Configure .env files
+        ├── Install backend deps on server
+        ├── Run Prisma migrations
+        ├── Start backend via PM2 (ecosystem.config.js)
+        ├── Restart Passenger for frontend
+        └── Verify everything
