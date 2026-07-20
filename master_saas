@@ -1,0 +1,2875 @@
+# master_saas.md
+# 🏗️ Master SaaS Blueprint — Production-Grade Architecture Guide
+
+> This blueprint is extracted from a real production SaaS (OraBooks).
+> Use this as your foundation for ANY SaaS product — replace domain logic, keep the architecture.
+
+---
+
+## 📋 Table of Contents
+
+1. [Project Structure](#1-project-structure)
+2. [Tech Stack](#2-tech-stack)
+3. [Environment & Secrets](#3-environment--secrets)
+4. [Backend Architecture (NestJS)](#4-backend-architecture-nestjs)
+5. [Database Architecture (Prisma + PostgreSQL)](#5-database-architecture-prisma--postgresql)
+6. [Authentication & Authorization](#6-authentication--authorization)
+7. [Multi-Tenancy](#7-multi-tenancy)
+8. [RBAC — Role-Based Access Control](#8-rbac--role-based-access-control)
+9. [API Standards](#9-api-standards)
+10. [Frontend Architecture (Next.js)](#10-frontend-architecture-nextjs)
+11. [State Management & Data Fetching](#11-state-management--data-fetching)
+12. [Event-Driven Architecture](#12-event-driven-architecture)
+13. [Async Job Queue](#13-async-job-queue)
+14. [Notification System](#14-notification-system)
+15. [Audit & Compliance](#15-audit--compliance)
+16. [AI Integration](#16-ai-integration)
+17. [File Uploads & OCR](#17-file-uploads--ocr)
+18. [Email System](#18-email-system)
+19. [Security Hardening](#19-security-hardening)
+20. [Deployment & DevOps](#20-deployment--devops)
+21. [Module Build Order](#21-module-build-order)
+22. [SaaS Feature Checklist](#22-saas-feature-checklist)
+23. [Coding Standards & Rules](#23-coding-standards--rules)
+24. [Common Pitfalls to Avoid](#24-common-pitfalls-to-avoid)
+
+---
+
+## 1. Project Structure
+
+
+Copy
+
+Insert at cursor
+your-saas/
+├── backend/ # NestJS API
+│ ├── prisma/
+│ │ ├── schema.prisma # Single source of truth for DB
+│ │ └── migrations/ # Auto-generated migration files
+│ ├── src/
+│ │ ├── common/
+│ │ │ ├── filters/ # Global exception filters
+│ │ │ ├── interceptors/ # Logging, response transform
+│ │ │ ├── middleware/ # HTTPS redirect, tenant guard
+│ │ │ ├── rbac/ # Permission decorators & guards
+│ │ │ └── utils/ # Shared utilities
+│ │ ├── config/
+│ │ │ ├── env.validation.ts # Startup env validation (class-validator)
+│ │ │ ├── secrets.loader.ts # Secret strength checks
+│ │ │ └── tls.config.ts # TLS options loader
+│ │ ├── modules/
+│ │ │ ├── auth/ # JWT + OIDC + 2FA
+│ │ │ ├── iam/ # Users, roles, permissions
+│ │ │ ├── organizations/ # Multi-tenant org management
+│ │ │ ├── team/ # Invites, memberships
+│ │ │ ├── audit/ # Immutable audit log
+│ │ │ ├── notifications/ # Notification center
+│ │ │ ├── email/ # Email delivery (Resend/SMTP)
+│ │ │ ├── cache/ # Redis cache module
+│ │ │ ├── outbox/ # Transactional outbox (event bus)
+│ │ │ ├── async-job/ # Background job queue
+│ │ │ ├── workflow/ # State machine engine
+│ │ │ ├── health/ # Health check endpoints
+│ │ │ ├── security/ # OWASP controls, dep scan
+│ │ │ ├── platform/ # Super-admin / platform governance
+│ │ │ ├── ai/ # AI provider abstraction
+│ │ │ ├── exports/ # PDF/CSV export engine
+│ │ │ ├── attachments/ # File upload & storage
+│ │ │ ├── csv-import/ # Bulk CSV import
+│ │ │ └── [your-domain]/ # Your business modules here
+│ │ ├── prisma/
+│ │ │ ├── prisma.module.ts
+│ │ │ └── prisma.service.ts
+│ │ ├── app.module.ts
+│ │ ├── main.ts
+│ │ └── root.controller.ts
+│ ├── env # Production env file (gitignored)
+│ ├── .env.example # Template for developers
+│ ├── package.json
+│ ├── tsconfig.json
+│ └── nest-cli.json
+│
+├── frontend/ # Next.js App Router
+│ ├── src/
+│ │ ├── app/
+│ │ │ ├── (auth)/ # Login, register, verify pages
+│ │ │ │ ├── login/
+│ │ │ │ └── register/
+│ │ │ ├── (dashboard)/ # Protected app pages
+│ │ │ │ ├── layout.tsx # Sidebar + topbar shell
+│ │ │ │ ├── dashboard/
+│ │ │ │ └── settings/
+│ │ │ ├── api/ # Next.js API routes (proxy)
+│ │ │ ├── globals.css
+│ │ │ ├── layout.tsx # Root layout + providers
+│ │ │ └── page.tsx # Landing / redirect
+│ │ ├── components/
+│ │ │ ├── ui/ # shadcn/ui base components
+│ │ │ ├── auth/ # Auth-specific components
+│ │ │ └── features/ # Domain feature components
+│ │ ├── hooks/ # React Query hooks per module
+│ │ │ ├── auth/
+│ │ │ ├── organizations/
+│ │ │ └── [module]/
+│ │ ├── lib/
+│ │ │ ├── api-client.ts # Axios instance + interceptors
+│ │ │ ├── api/ # API call functions per module
+│ │ │ └── utils.ts # cn(), formatters, etc.
+│ │ └── providers/
+│ │ └── app-providers.tsx # QueryClient, theme, etc.
+│ ├── public/
+│ ├── .env.example
+│ ├── next.config.ts
+│ ├── tailwind.config.ts
+│ └── package.json
+│
+├── packages/
+│ └── tsconfig/
+│ └── base.json # Shared TS config
+│
+├── .github/
+│ └── workflows/
+│ └── ci-cd.yml # GitHub Actions pipeline
+│
+├── ecosystem.config.js # PM2 process config
+├── deploy.sh # Unified deploy script
+└── .env.example # Root env template
+
+
+---
+
+## 2. Tech Stack
+
+### Backend
+| Layer | Technology | Why |
+|---|---|---|
+| Framework | NestJS 11 | Modular, DI, decorators, enterprise-ready |
+| Language | TypeScript 5.9 | Type safety end-to-end |
+| ORM | Prisma 7 | Type-safe DB client, migrations |
+| Database | PostgreSQL 15+ | ACID, JSON support, row-level security |
+| Cache | Redis (ioredis) | Session cache, rate limiting, pub/sub |
+| Auth | JWT + Passport | Access (15m) + Refresh (30d) tokens |
+| OIDC | Google OAuth2 / JOSE | Social login |
+| 2FA | otplib + speakeasy | TOTP-based 2FA |
+| Email | Resend + Nodemailer | Primary + SMTP fallback |
+| Validation | class-validator + class-transformer | DTO validation |
+| API Docs | Swagger / OpenAPI | Auto-generated from decorators |
+| Security | Helmet, CORS, HSTS | OWASP Top-10 hardening |
+| Scheduler | @nestjs/schedule | Cron jobs |
+| Process | PM2 | Production process management |
+
+### Frontend
+| Layer | Technology | Why |
+|---|---|---|
+| Framework | Next.js 16 (App Router) | SSR, RSC, file-based routing |
+| Language | TypeScript 5.9 | Type safety |
+| Styling | Tailwind CSS 4 | Utility-first, fast |
+| Components | shadcn/ui + Radix UI | Accessible, unstyled primitives |
+| Data Fetching | TanStack Query v5 | Server state, caching, mutations |
+| Forms | React Hook Form + Zod | Performant, schema validation |
+| HTTP Client | Axios | Interceptors, token refresh |
+| Icons | Lucide React | Consistent icon set |
+| PWA | @ducanh2912/next-pwa | Offline support |
+
+---
+
+## 3. Environment & Secrets
+
+### Rule: Never hardcode secrets. Validate at startup.
+
+```typescript
+// backend/src/config/env.validation.ts
+// Use class-validator to validate ALL env vars at startup
+// App refuses to start if any required var is missing or weak
+
+class EnvironmentVariables {
+  @IsNumberString()
+  PORT!: string;
+
+  @IsString() @IsNotEmpty()
+  JWT_ACCESS_SECRET!: string;   // min 64 hex chars
+
+  @IsString() @IsNotEmpty()
+  JWT_REFRESH_SECRET!: string;  // min 64 hex chars
+
+  @IsString() @IsNotEmpty()
+  DATABASE_URL!: string;
+
+  @IsString() @IsNotEmpty()
+  ENCRYPTION_KEY!: string;      // 64 hex chars = 32 bytes AES-256
+
+  // All others @IsOptional()
+}
+
+
+Copy
+
+Insert at cursor
+Required Environment Variables
+# ── Core ──────────────────────────────────────────────────────
+NODE_ENV=production
+PORT=3001
+API_PREFIX=api
+CORS_ORIGIN=https://yourdomain.com
+
+# ── JWT (generate with: openssl rand -hex 64) ─────────────────
+JWT_ACCESS_SECRET=<64-hex-chars>
+JWT_REFRESH_SECRET=<64-hex-chars>
+JWT_ACCESS_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=30d
+
+# ── Database ──────────────────────────────────────────────────
+DATABASE_URL=postgresql://user:pass@localhost:5432/dbname
+DIRECT_URL=postgresql://user:pass@localhost:5432/dbname
+
+# ── Cache ─────────────────────────────────────────────────────
+REDIS_URL=redis://localhost:6379
+
+# ── OIDC (Google) ─────────────────────────────────────────────
+OIDC_ISSUER_URL=https://accounts.google.com
+OIDC_CLIENT_ID=<google-client-id>
+OIDC_CLIENT_SECRET=<google-client-secret>
+OIDC_AUDIENCE=<google-client-id>
+OAUTH_REQUIRE_PKCE=true
+
+# ── Email ─────────────────────────────────────────────────────
+RESEND_API_KEY=re_xxxx
+EMAIL_FROM=YourApp <noreply@yourdomain.com>
+APP_URL=https://yourdomain.com
+
+# ── Security ──────────────────────────────────────────────────
+ENCRYPTION_KEY=<64-hex-chars>
+INTERNAL_API_KEY=<32-hex-chars>
+TLS_ENABLED=false
+
+# ── AI (all optional) ─────────────────────────────────────────
+AI_DEFAULT_PROVIDER=openai
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
+
+
+Copy
+
+Insert at cursor
+bash
+4. Backend Architecture (NestJS)
+main.ts — Bootstrap Pattern
+async function bootstrap(): Promise<void> {
+  // 1. Validate secrets FIRST — fail fast before anything starts
+  loadAndValidateSecrets();
+
+  // 2. Load TLS options
+  const tlsOptions = loadTlsOptions();
+
+  // 3. Create app
+  const app = await NestFactory.create(AppModule, tlsOptions ? { httpsOptions: tlsOptions } : {});
+
+  // 4. Global prefix (exclude health checks)
+  app.setGlobalPrefix('api', { exclude: ['health', 'health/live', 'health/ready'] });
+
+  // 5. Swagger (dev only or behind auth in prod)
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Your SaaS API')
+    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'jwt')
+    .build();
+  SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+
+  // 6. Security headers
+  app.use(helmet({ hsts: process.env.NODE_ENV === 'production' ? { maxAge: 31536000 } : false }));
+
+  // 7. CORS
+  app.enableCors({ origin: process.env.CORS_ORIGIN?.split(','), credentials: true });
+
+  // 8. Global validation pipe
+  app.useGlobalPipes(new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transformOptions: { enableImplicitConversion: true },
+  }));
+
+  // 9. Global filters & interceptors
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new LoggingInterceptor(), new ResponseTransformInterceptor());
+
+  await app.listen(Number(process.env.PORT ?? 3001));
+}
+
+
+Copy
+
+Insert at cursor
+typescript
+Module Structure Pattern
+Every module follows this structure:
+
+modules/your-module/
+├── application/
+│   ├── services/
+│   │   └── your-module.service.ts      # Business logic
+│   └── dtos/
+│       ├── create-item.dto.ts
+│       └── update-item.dto.ts
+├── presentation/
+│   └── your-module.controller.ts       # HTTP layer only
+├── infrastructure/
+│   └── your-module.repository.ts       # DB queries (optional)
+└── your-module.module.ts
+
+Copy
+
+Insert at cursor
+Response Transform Interceptor
+All API responses are wrapped:
+
+// Success response shape
+{
+  "success": true,
+  "data": { ... },
+  "timestamp": "2025-01-01T00:00:00.000Z"
+}
+
+// Error response shape (from HttpExceptionFilter)
+{
+  "success": false,
+  "error": {
+    "statusCode": 400,
+    "message": "Validation failed",
+    "path": "/api/users",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+
+Copy
+
+Insert at cursor
+typescript
+app.module.ts — Middleware Registration
+@Module({ imports: [...allModules] })
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // HTTPS redirect (defence-in-depth behind Nginx)
+    consumer.apply(HttpsRedirectMiddleware)
+      .forRoutes({ path: '*path', method: RequestMethod.ALL });
+
+    // Tenant isolation — block partner/suspended orgs from business APIs
+    consumer.apply(RequireTenantMiddleware)
+      .forRoutes(
+        { path: 'journals/*path', method: RequestMethod.ALL },
+        { path: 'invoices/*path', method: RequestMethod.ALL },
+        // ... all business routes
+      );
+  }
+}
+
+Copy
+
+Insert at cursor
+typescript
+5. Database Architecture (Prisma + PostgreSQL)
+Core Schema Patterns
+// ── Every model MUST have these fields ────────────────────────
+model AnyModel {
+  id             String   @id @default(uuid())
+  organizationId String                          // tenant isolation
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(...)
+
+  @@index([organizationId])                      // always index org
+}
+
+// ── Soft delete pattern ───────────────────────────────────────
+model SoftDeletable {
+  id        String    @id @default(uuid())
+  deletedAt DateTime?                            // null = active
+  deletedBy String?
+
+  @@index([deletedAt])
+}
+
+// ── Idempotency pattern (for mutations) ───────────────────────
+model Transaction {
+  idempotencyKey String? @unique @db.VarChar(128)
+  // Client sends this key; server ignores duplicate requests
+}
+
+// ── Status enum pattern ───────────────────────────────────────
+enum WorkflowStatus {
+  draft
+  submitted
+  approved
+  posted
+  locked
+  reversed
+}
+
+
+Copy
+
+Insert at cursor
+prisma
+Core Models Every SaaS Needs
+model User {
+  id                     String       @id @default(uuid())
+  email                  String       @unique
+  passwordHash           String       @default("")
+  firstName              String?
+  lastName               String?
+  isActive               Boolean      @default(true)
+  isEmailVerified        Boolean      @default(false)
+  emailVerificationToken String?
+  emailVerificationExpiresAt DateTime?
+  passwordResetToken     String?
+  passwordResetExpiresAt DateTime?
+  is2faEnabled           Boolean      @default(false)
+  totpSecret             String?
+  authProvider           AuthProvider @default(local)
+  lastLoginAt            DateTime?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  memberships   Membership[]
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  backupCodes   TwoFactorBackupCode[]
+  notifications Notification[]
+
+  @@index([email])
+}
+
+model Organization {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  subdomain String    @unique
+  orgType   OrgType   @default(customer)
+  tier      OrgTier   @default(free)
+  status    OrgStatus @default(active)
+  region    OrgRegion @default(us)
+  config    Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  memberships Membership[]
+  auditLogs   AuditLog[]
+  quota       OrgQuota?
+
+  @@index([slug])
+  @@index([subdomain])
+  @@index([orgType, status])
+}
+
+model Membership {
+  id             String           @id @default(uuid())
+  userId         String
+  organizationId String
+  role           MemberRole       @default(viewer)
+  status         MembershipStatus @default(ACTIVE)
+  joinedAt       DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user         User         @relation(...)
+  organization Organization @relation(...)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model RefreshToken {
+  id             String    @id @default(uuid())
+  userId         String
+  organizationId String?
+  tokenHash      String                    // SHA-256 hash only, never raw
+  deviceMetadata Json?
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, organizationId])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id             String        @id @default(uuid())
+  organizationId String?
+  userId         String?
+  eventType      String
+  severity       AuditSeverity @default(info)
+  description    String
+  ipAddress      String?
+  userAgent      String?
+  correlationId  String        @default("")
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+
+  // NO updatedAt — audit logs are IMMUTABLE
+  @@index([organizationId])
+  @@index([eventType])
+  @@index([correlationId])
+  @@index([createdAt])
+}
+
+
+Copy
+
+Insert at cursor
+pris
+Migration Rules
+# Development
+npx prisma migrate dev --name describe_your_change
+
+# Production (CI/CD)
+npx prisma migrate deploy
+
+# Never use --force-reset in production
+# Never manually edit migration files after they're applied
+# Always run prisma generate after schema changes
+
+Copy
+
+Insert at cursor
+bash
+6. Authentication & Authorization
+JWT Strategy
+Access Token:  15 minutes  (in Authorization header)
+Refresh Token: 30 days     (HTTP-only cookie OR body)
+Storage:       tokenHash in DB (SHA-256 of raw token)
+Rotation:      Mandatory on every refresh
+Revocation:    Set revokedAt timestamp
+
+Copy
+
+Insert at cursor
+Auth Flow
+1. POST /api/auth/register
+   → validate email + password policy
+   → bcrypt hash (cost 10)
+   → send verification email
+   → return { message: "Verification email sent" }
+
+2. GET /api/auth/verify-email?token=xxx
+   → validate token (24h expiry)
+   → set isEmailVerified = true
+
+3. POST /api/auth/login
+   → check isEmailVerified
+   → check is2faEnabled → if true, return temp token
+   → issue access + refresh tokens
+   → store tokenHash in DB
+
+4. POST /api/auth/refresh
+   → validate refresh token hash
+   → rotate: revoke old, issue new
+   → return new access + refresh tokens
+
+5. POST /api/auth/logout
+   → set revokedAt on refresh token
+   → clear cookies
+
+6. POST /api/auth/2fa/setup
+   → generate TOTP secret
+   → return QR code URL + backup codes
+
+7. POST /api/auth/2fa/challenge
+   → verify TOTP (±30s drift)
+   → issue final tokens
+
+
+Copy
+
+Insert at cursor
+Password Policy
+// Minimum requirements
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+// Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
+
+Copy
+
+Insert at cursor
+typescript
+Rate Limiting
+// Registration: 5 per hour per IP
+// Login: 5 failures per 15 min per IP+email
+// Password reset: 3 per hour per email
+// Email resend: 3 per hour per email
+// Subdomain check: 10 per minute per IP
+
+Copy
+
+Insert at cursor
+typescript
+OIDC (Google) Flow
+// 1. Frontend redirects to /api/auth/google
+// 2. Google redirects back to /api/auth/google/callback
+// 3. Backend exchanges code for user info
+// 4. If email exists with local auth → 409 Conflict
+// 5. If new user → create account (isEmailVerified = true)
+// 6. Issue tokens, redirect to dashboard
+
+Copy
+
+Insert at cursor
+typescript
+7. Multi-Tenancy
+Core Doctrine
+Every database query MUST be scoped by organizationId.
+No exceptions. Enforced by middleware + code review.
+
+Copy
+
+Insert at cursor
+Tenant Isolation Middleware
+@Injectable()
+export class TenantIsolationMiddleware implements NestMiddleware {
+  use(req: Request, res: Response, next: NextFunction) {
+    const orgIdFromJwt = req.user?.organizationId;
+    const orgIdFromRoute = req.params?.organizationId;
+
+    // Cross-tenant access = immediate 403
+    if (orgIdFromRoute && orgIdFromRoute !== orgIdFromJwt) {
+      throw new ForbiddenException('Cross-tenant access denied');
+    }
+
+    // Suspended/frozen orgs = 403
+    if (req.org?.status !== 'active') {
+      throw new ForbiddenException('Organization is not active');
+    }
+
+    next();
+  }
+}
+
+Copy
+
+Insert at cursor
+typescript
+Organization Types
+customer    → Full product access (your paying users)
+partner     → Referral/reseller program (no product access)
+platform    → Internal super-admin (OraBooks team)
+
+Copy
+
+Insert at cursor
+Org Status State Machine
+pending_setup → (admin approve) → active
+active → (admin suspend) → suspended
+suspended → (admin reactivate) → active
+active → (fraud detected) → fraud_freeze  [TERMINAL — no exit]
+active → (payment issue) → payout_hold
+
+Copy
+
+Insert at cursor
+Subdomain Architecture
+Store only identifier: "mycompany"
+Build full domain at runtime: mycompany.yourdomain.com
+
+Reserved subdomains (block these):
+admin, api, app, support, billing, www, root, system
+
+Copy
+
+Insert at cursor
+Tier System
+free       → Basic features, limited quota
+premium    → Full features, higher quota
+enterprise → Unlimited, custom region, SLA
+partner    → No product access, commission only
+system     → Internal platform use
+
+Copy
+
+Insert at cursor
+8. RBAC — Role-Based Access Control
+Roles (per organization membership)
+owner    → Full control, can transfer ownership
+admin    → Can invite users, manage settings
+approver → Can approve workflows (e.g., journals, invoices)
+staff    → Can create/edit transactions
+viewer   → Read-only access
+
+Copy
+
+Insert at cursor
+Permission Matrix
+const PERMISSIONS = {
+  // User management
+  'invite_user':              ['owner', 'admin'],
+  'change_role':              ['owner'],
+  'remove_user':              ['owner'],
+
+  // Settings
+  'manage_settings':          ['owner', 'admin'],
+
+  // Business operations
+  'submit_transaction':       ['owner', 'admin', 'staff'],
+  'approve_transaction':      ['owner', 'admin', 'approver'],
+  'view_reports':             ['owner', 'admin', 'approver', 'staff', 'viewer'],
+  'export_reports':           ['owner', 'admin', 'staff'],
+
+  // Audit
+  'view_audit_logs':          ['owner', 'admin'],
+
+  // Platform (super-admin only)
+  'platform_admin':           [],  // checked separately via UserGlobalRole
+};
+
+// Deny-by-default: any permission not listed = DENY
+
+Copy
+
+Insert at cursor
+typescript
+Permission Guard
+@Injectable()
+export class PermissionGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    const required = this.reflector.get<string>('permission', context.getHandler());
+    if (!required) return true;
+
+    const { user } = context.switchToHttp().getRequest();
+    const allowed = PERMISSIONS[required] ?? [];
+
+    if (!allowed.includes(user.role)) {
+      // Log the denied attempt
+      this.auditService.log({
+        eventType: 'permission_denied',
+        severity: 'warning',
+        metadata: { permission: required, role: user.role }
+      });
+      throw new ForbiddenException(`Permission denied: ${required}`);
+    }
+
+    return true;
+  }
+}
+
+// Usage on controller
+@Get('reports')
+@RequirePermission('view_reports')
+async getReports() { ... }
+
+
+Copy
+
+Insert at cursor
+typescript
+JWT Payload
+interface JwtPayload {
+  sub: string;           // userId
+  email: string;
+  organizationId: string;
+  role: MemberRole;
+  orgType: OrgType;
+  subdomain: string;
+  iat: number;
+  exp: number;
+}
+
+Copy
+
+Insert at cursor
+typescript
+9. API Standards
+URL Conventions
+GET    /api/[resource]              → list (paginated)
+POST   /api/[resource]              → create
+GET    /api/[resource]/:id          → get one
+PATCH  /api/[resource]/:id          → partial update
+DELETE /api/[resource]/:id          → delete (soft preferred)
+
+POST   /api/[resource]/:id/[action] → state transitions
+       e.g. POST /api/invoices/:id/approve
+            POST /api/invoices/:id/post
+            POST /api/invoices/:id/reverse
+
+Copy
+
+Insert at cursor
+Pagination Standard
+// Request
+GET /api/invoices?page=1&limit=20&sortBy=createdAt&sortOrder=desc
+
+// Response
+{
+  "success": true,
+  "data": {
+    "items": [...],
+    "total": 150,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 8
+  }
+}
+
+Copy
+
+Insert at cursor
+typescript
+DTO Validation Pattern
+export class CreateItemDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsDecimal({ decimal_digits: '0,4' })
+  @Min(0)
+  amount!: string;
+
+  @IsDateString()
+  date!: string;
+
+  @IsOptional()
+  @IsUUID()
+  idempotencyKey?: string;  // client-provided for safe retries
+}
+
+Copy
+
+Insert at cursor
+typescript
+Idempotency Pattern
+// Client sends X-Idempotency-Key header or body field
+// Server checks: if key exists and status = success → return cached response
+// Prevents duplicate charges, double-posts, etc.
+
+const existing = await this.prisma.transaction.findUnique({
+  where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } }
+});
+if (existing) return existing; // Return cached result
+
+Copy
+
+Insert at cursor
+typescript
+10. Frontend Architecture (Next.js)
+Route Groups
+app/
+├── (auth)/          → Public routes (no auth required)
+│   ├── login/
+│   ├── register/
+│   └── verify-email/
+├── (dashboard)/     → Protected routes (auth required)
+│   ├── layout.tsx   → Auth check + sidebar shell
+│   ├── dashboard/
+│   └── settings/
+└── api/             → Next.js API routes (BFF proxy)
+
+Copy
+
+Insert at cursor
+Auth Guard in Layout
+// app/(dashboard)/layout.tsx
+export default function DashboardLayout({ children }) {
+  const router = useRouter();
+
+  useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    if (!token) router.replace('/login');
+  }, []);
+
+  return (
+    <div className="flex h-screen">
+      <Sidebar />
+      <main>{children}</main>
+    </div>
+  );
+}
+
+Copy
+
+Insert at cursor
+typescript
+Sidebar Navigation Pattern
+interface NavItem {
+  label: string;
+  href?: string;
+  icon: React.ElementType;
+  permission?: string;      // hide if user lacks this permission
+  superAdminOnly?: boolean; // only platform_owner sees this
+  children?: { label: string; href: string }[];
+}
+
+// Filter nav items based on permissions
+const visibleItems = items.filter(item => {
+  if (item.superAdminOnly && !isPlatformOwner) return false;
+  if (item.permission && !can(item.permission)) return false;
+  return true;
+});
+
+Copy
+
+Insert at cursor
+typescript
+API Client Pattern
+// lib/api-client.ts
+export const apiClient = axios.create({
+  baseURL: typeof window === 'undefined'
+    ? process.env.NEXT_PUBLIC_API_BASE_URL
+    : '/api',           // Use Next.js proxy in browser
+  withCredentials: true,
+  timeout
+
+Copy
+
+Insert at cursor
+typescript
+continue
+
+
+Context
+  timeout: 10_000,
+});
+
+// ── Request interceptor: attach access token ──────────────────
+apiClient.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('access_token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ── Response interceptor: unwrap + auto-refresh ───────────────
+let isRefreshing = false;
+let queue: Array<(token: string) => void> = [];
+
+apiClient.interceptors.response.use(
+  (res) => {
+    // Unwrap { success, data, timestamp } → data
+    if (res.data?.success !== undefined && 'data' in res.data) {
+      res.data = res.data.data;
+    }
+    return res;
+  },
+  async (error) => {
+    // Unwrap backend error message
+    const backendMsg = error.response?.data?.error?.message;
+    if (backendMsg) error.message = Array.isArray(backendMsg)
+      ? backendMsg.join(', ')
+      : backendMsg;
+
+    // Emit global 403 event → AccessDeniedModal reacts
+    if (error.response?.status === 403 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('app:forbidden', {
+        detail: { message: error.message }
+      }));
+    }
+
+    // Auto-refresh on 401
+    const original = error.config;
+    const isAuthRoute = original?.url?.includes('/auth/');
+    if (error.response?.status === 401 && !original?._retry && !isAuthRoute) {
+      if (isRefreshing) {
+        return new Promise(resolve => {
+          queue.push(token => {
+            original.headers.Authorization = `Bearer ${token}`;
+            resolve(apiClient(original));
+          });
+        });
+      }
+      original._retry = true;
+      isRefreshing = true;
+      try {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (!refreshToken) throw new Error('No refresh token');
+        const res = await apiClient.post('/auth/refresh', { refreshToken });
+        const { accessToken, refreshToken: newRefresh } = res.data;
+        localStorage.setItem('access_token', accessToken);
+        localStorage.setItem('refresh_token', newRefresh);
+        queue.forEach(cb => cb(accessToken));
+        queue = [];
+        original.headers.Authorization = `Bearer ${accessToken}`;
+        return apiClient(original);
+      } catch {
+        queue = [];
+        localStorage.clear();
+        window.location.href = '/login';
+      } finally {
+        isRefreshing = false;
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+
+Copy
+
+Insert at cursor
+11. State Management & Data Fetching
+TanStack Query Pattern
+// hooks/[module]/use-[resource].ts
+
+// ── List hook ─────────────────────────────────────────────────
+export function useInvoices(params?: { page?: number; status?: string }) {
+  return useQuery({
+    queryKey: ['invoices', params],
+    queryFn: () => invoiceApi.list(params),
+    staleTime: 30_000,   // 30s before refetch
+  });
+}
+
+// ── Single item hook ──────────────────────────────────────────
+export function useInvoice(id: string) {
+  return useQuery({
+    queryKey: ['invoices', id],
+    queryFn: () => invoiceApi.getById(id),
+    enabled: !!id,
+  });
+}
+
+// ── Mutation hook ─────────────────────────────────────────────
+export function useCreateInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: invoiceApi.create,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    },
+  });
+}
+
+// ── State transition hook ─────────────────────────────────────
+export function useApproveInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => invoiceApi.approve(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices', id] });
+    },
+  });
+}
+
+
+Copy
+
+Insert at cursor
+typescript
+API Function Pattern
+// lib/api/invoice.api.ts
+export const invoiceApi = {
+  list: (params?: ListParams) =>
+    apiClient.get('/invoices', { params }).then(r => r.data),
+
+  getById: (id: string) =>
+    apiClient.get(`/invoices/${id}`).then(r => r.data),
+
+  create: (dto: CreateInvoiceDto) =>
+    apiClient.post('/invoices', dto).then(r => r.data),
+
+  update: (id: string, dto: UpdateInvoiceDto) =>
+    apiClient.patch(`/invoices/${id}`, dto).then(r => r.data),
+
+  approve: (id: string) =>
+    apiClient.post(`/invoices/${id}/approve`).then(r => r.data),
+
+  post: (id: string) =>
+    apiClient.post(`/invoices/${id}/post`).then(r => r.data),
+
+  reverse: (id: string, reason: string) =>
+    apiClient.post(`/invoices/${id}/reverse`, { reason }).then(r => r.data),
+};
+
+Copy
+
+Insert at cursor
+typescript
+Permissions Hook
+// hooks/auth/use-permissions.ts
+export function usePermissions() {
+  const token = typeof window !== 'undefined'
+    ? localStorage.getItem('access_token')
+    : null;
+
+  const payload = token ? decodeJwt(token) : null;
+
+  const can = (permission: string): boolean => {
+    if (!payload?.role) return false;
+    const allowed = PERMISSIONS[permission] ?? [];
+    return allowed.includes(payload.role);
+  };
+
+  return {
+    role: payload?.role as MemberRole | undefined,
+    orgType: payload?.orgType as OrgType | undefined,
+    isPlatformOwner: payload?.platformRole === 'platform_owner',
+    can,
+  };
+}
+
+Copy
+
+Insert at cursor
+typescript
+12. Event-Driven Architecture
+Transactional Outbox Pattern
+Problem: If you publish an event AFTER a DB commit,
+         the app can crash between commit and publish → lost event.
+
+Solution: Write event to outbox table IN THE SAME TRANSACTION.
+          A background worker reads outbox and publishes.
+
+Copy
+
+Insert at cursor
+// Inside a service method — same transaction
+await this.prisma.$transaction(async (tx) => {
+  // 1. Business operation
+  const invoice = await tx.invoice.update({
+    where: { id },
+    data: { workflowStatus: 'posted', postedAt: new Date() }
+  });
+
+  // 2. Write event to outbox (same transaction)
+  await tx.outboxMessage.create({
+    data: {
+      eventType: 'invoice.posted',
+      aggregateId: invoice.id,
+      payload: { invoiceId: invoice.id, organizationId: invoice.organizationId },
+      status: 'pending',
+    }
+  });
+});
+// If transaction fails → both rollback. No lost events.
+
+Copy
+
+Insert at cursor
+typescript
+Outbox Worker
+// Runs every 5 seconds via @nestjs/schedule
+@Cron('*/5 * * * * *')
+async processOutbox() {
+  const messages = await this.prisma.outboxMessage.findMany({
+    where: { status: 'pending' },
+    orderBy: { createdAt: 'asc' },
+    take: 50,
+  });
+
+  for (const msg of messages) {
+    try {
+      await this.eventBus.publish(msg.eventType, msg.payload);
+      await this.prisma.outboxMessage.update({
+        where: { id: msg.id },
+        data: { status: 'sent' }
+      });
+    } catch {
+      await this.prisma.outboxMessage.update({
+        where: { id: msg.id },
+        data: {
+          retryCount: { increment: 1 },
+          lastAttempt: new Date(),
+          status: msg.retryCount >= 5 ? 'dead_letter' : 'pending',
+        }
+      });
+    }
+  }
+}
+
+
+Copy
+
+Insert at cursor
+typescript
+Domain Events to Implement
+// Define all your domain events here
+const DOMAIN_EVENTS = {
+  // Auth
+  'user.registered':           ['send_welcome_email', 'create_audit_log'],
+  'user.email_verified':       ['activate_account', 'create_audit_log'],
+  'user.password_reset':       ['revoke_all_sessions', 'create_audit_log'],
+
+  // Organization
+  'org.created':               ['load_default_config', 'create_audit_log'],
+  'org.suspended':             ['revoke_all_sessions', 'notify_owner'],
+
+  // Business (replace with your domain)
+  'invoice.posted':            ['update_ar_balance', 'send_notification', 'create_audit_log'],
+  'payment.received':          ['update_invoice_status', 'send_receipt', 'create_audit_log'],
+};
+
+Copy
+
+Insert at cursor
+typescript
+13. Async Job Queue
+AsyncJob Model
+enum JobStatus {
+  pending
+  processing
+  completed
+  failed
+  dead_letter
+}
+
+model AsyncJob {
+  id          String    @id @default(uuid())
+  queueName   String    @default("default")
+  jobType     String                          // 'send_email', 'generate_pdf', etc.
+  payload     Json
+  status      JobStatus @default(pending)
+  priority    Int       @default(5)           // lower = higher priority
+  retryCount  Int       @default(0)
+  maxRetries  Int       @default(5)
+  nextRetryAt DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  lastError   String?
+  heartbeatAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, nextRetryAt, priority])
+  @@index([queueName, status])
+  @@index([jobType])
+}
+
+
+Copy
+
+Insert at cursor
+prisma
+Job Worker Pattern
+@Injectable()
+export class JobWorkerService {
+  // Runs every 3 seconds
+  @Cron('*/3 * * * * *')
+  async processJobs() {
+    // SELECT FOR UPDATE SKIP LOCKED — prevents double processing
+    const job = await this.prisma.$queryRaw`
+      SELECT * FROM async_jobs
+      WHERE status = 'pending'
+        AND next_retry_at <= NOW()
+      ORDER BY priority ASC, created_at ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    `;
+
+    if (!job) return;
+
+    await this.prisma.asyncJob.update({
+      where: { id: job.id },
+      data: { status: 'processing', startedAt: new Date() }
+    });
+
+    try {
+      await this.dispatch(job.jobType, job.payload);
+      await this.prisma.asyncJob.update({
+        where: { id: job.id },
+        data: { status: 'completed', completedAt: new Date() }
+      });
+    } catch (error) {
+      const nextRetry = new Date(Date.now() + Math.pow(2, job.retryCount) * 5000);
+      await this.prisma.asyncJob.update({
+        where: { id: job.id },
+        data: {
+          status: job.retryCount >= job.maxRetries ? 'dead_letter' : 'pending',
+          retryCount: { increment: 1 },
+          nextRetryAt: nextRetry,
+          lastError: error.message,
+        }
+      });
+    }
+  }
+
+  private async dispatch(jobType: string, payload: unknown) {
+    const handlers: Record<string, (p: unknown) => Promise<void>> = {
+      'send_email':    (p) => this.emailService.send(p),
+      'generate_pdf':  (p) => this.pdfService.generate(p),
+      'send_webhook':  (p) => this.webhookService.send(p),
+      // Add your job types here
+    };
+
+    const handler = handlers[jobType];
+    if (!handler) throw new Error(`Unknown job type: ${jobType}`);
+    await handler(payload);
+  }
+}
+
+
+Copy
+
+Insert at cursor
+typescript
+Enqueue Helper
+async enqueueJob(jobType: string, payload: unknown, options?: {
+  priority?: number;
+  maxRetries?: number;
+  delayMs?: number;
+  queueName?: string;
+}) {
+  return this.prisma.asyncJob.create({
+    data: {
+      jobType,
+      payload: payload as Prisma.InputJsonValue,
+      priority: options?.priority ?? 5,
+      maxRetries: options?.maxRetries ?? 5,
+      queueName: options?.queueName ?? 'default',
+      nextRetryAt: new Date(Date.now() + (options?.delayMs ?? 0)),
+    }
+  });
+}
+
+Copy
+
+Insert at cursor
+typescript
+14. Notification System
+Notification Model
+enum NotificationPriority { critical high normal low }
+enum NotificationStatus   { pending queued delivering delivered failed dead_letter }
+
+model Notification {
+  id               String               @id @default(uuid())
+  organizationId   String
+  userId           String
+  eventType        String               @db.VarChar(64)
+  priority         NotificationPriority @default(normal)
+  title            String?
+  message          String?
+  payload          Json?
+  correlationId    String               @default("")
+  status           NotificationStatus   @default(pending)
+  isRead           Boolean              @default(false)
+  readAt           DateTime?
+  deliveredAt      DateTime?
+  deliveryChannel  String?              // 'in_app', 'email', 'push'
+  deliveryProvider String?
+  slaBreached      Boolean              @default(false)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@index([userId, status])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+}
+
+
+Copy
+
+Insert at cursor
+prisma
+Notification Service Pattern
+@Injectable()
+export class NotificationsService {
+  async send(dto: {
+    organizationId: string;
+    userId: string;
+    eventType: string;
+    title: string;
+    message: string;
+    priority?: NotificationPriority;
+    channels?: ('in_app' | 'email' | 'push')[];
+    payload?: Record<string, unknown>;
+  }) {
+    // 1. Always create in-app notification
+    const notification = await this.prisma.notification.create({
+      data: {
+        organizationId: dto.organizationId,
+        userId: dto.userId,
+        eventType: dto.eventType,
+        title: dto.title,
+        message: dto.message,
+        priority: dto.priority ?? 'normal',
+        payload: dto.payload,
+        status: 'pending',
+      }
+    });
+
+    // 2. Queue email/push via async job
+    const channels = dto.channels ?? ['in_app'];
+    if (channels.includes('email')) {
+      await this.jobQueue.enqueue('send_notification_email', {
+        notificationId: notification.id,
+        userId: dto.userId,
+      });
+    }
+
+    return notification;
+  }
+
+  async markRead(id: string, userId: string) {
+    return this.prisma.notification.update({
+      where: { id, userId },
+      data: { isRead: true, readAt: new Date() }
+    });
+  }
+
+  async getUnread(userId: string, organizationId: string) {
+    return this.prisma.notification.findMany({
+      where: { userId, organizationId, isRead: false },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+}
+
+
+Copy
+
+Insert at cursor
+typescript
+15. Audit & Compliance
+Immutability Rules
+-- Database triggers prevent any UPDATE or DELETE on audit_logs
+CREATE OR REPLACE FUNCTION prevent_audit_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'Audit logs are immutable';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER no_audit_update
+  BEFORE UPDATE ON audit_logs
+  FOR EACH ROW EXECUTE FUNCTION prevent_audit_mutation();
+
+CREATE TRIGGER no_audit_delete
+  BEFORE DELETE ON audit_logs
+  FOR EACH ROW EXECUTE FUNCTION prevent_audit_mutation();
+
+Copy
+
+Insert at cursor
+sql
+Audit Service
+@Injectable()
+export class AuditService {
+  async log(dto: {
+    organizationId?: string;
+    userId?: string;
+    eventType: string;
+    description: string;
+    severity?: 'info' | 'warning' | 'critical';
+    metadata?: Record<string, unknown>;
+    ipAddress?: string;
+    userAgent?: string;
+    correlationId?: string;
+  }) {
+    // Sanitize metadata — NEVER log passwords, tokens, card data
+    const safeMetadata = this.sanitize(dto.metadata);
+
+    return this.prisma.auditLog.create({
+      data: {
+        organizationId: dto.organizationId,
+        userId: dto.userId,
+        eventType: dto.eventType,
+        description: dto.description,
+        severity: dto.severity ?? 'info',
+        metadata: safeMetadata,
+        ipAddress: dto.ipAddress,
+        userAgent: dto.userAgent,
+        correlationId: dto.correlationId ?? randomUUID(),
+      }
+    });
+  }
+
+  private sanitize(metadata?: Record<string, unknown>) {
+    if (!metadata) return undefined;
+    const BLOCKED_KEYS = ['password', 'token', 'secret', 'key', 'card', 'cvv', 'ssn'];
+    return Object.fromEntries(
+      Object.entries(metadata).filter(([k]) =>
+        !BLOCKED_KEYS.some(blocked => k.toLowerCase().includes(blocked))
+      )
+    );
+  }
+}
+
+
+Copy
+
+Insert at cursor
+typescript
+Mandatory Audit Events
+// Auth events
+'user.registered'           // info
+'user.email_verified'       // info
+'user.login_success'        // info
+'user.login_failed'         // warning
+'user.logout'               // info
+'user.password_reset'       // info
+'user.2fa_enabled'          // info
+
+// Organization events
+'org.created'               // info
+'org.suspended'             // warning
+'org.fraud_freeze'          // critical
+
+// Team events
+'team.invite_sent'          // info
+'team.invite_accepted'      // info
+'team.member_removed'       // warning
+'team.role_changed'         // info
+
+// Security events
+'security.permission_denied'  // warning
+'security.cross_tenant_attempt' // critical
+
+// Business events (your domain)
+'[resource].created'        // info
+'[resource].approved'       // info
+'[resource].rejected'       // info
+'[resource].deleted'        // warning
+
+
+Copy
+
+Insert at cursor
+typescript
+16. AI Integration
+Provider Abstraction Pattern
+// modules/ai/ai.service.ts
+@Injectable()
+export class AiService {
+  async complete(prompt: string, options?: {
+    provider?: 'openai' | 'anthropic' | 'gemini' | 'ollama';
+    model?: string;
+    maxTokens?: number;
+    temperature?: number;
+  }): Promise<string> {
+    const provider = options?.provider
+      ?? process.env.AI_DEFAULT_PROVIDER
+      ?? 'openai';
+
+    switch (provider) {
+      case 'openai':    return this.openai(prompt, options);
+      case 'anthropic': return this.anthropic(prompt, options);
+      case 'gemini':    return this.gemini(prompt, options);
+      case 'ollama':    return this.ollama(prompt, options);
+      default: throw new Error(`Unknown AI provider: ${provider}`);
+    }
+  }
+}
+
+Copy
+
+Insert at cursor
+typescript
+AI Governance Rules
+1. AI NEVER directly mutates data — it only suggests
+2. All AI suggestions require human approval before posting
+3. Confidence score < 70% → route to human review queue
+4. High risk level → mandatory human review
+5. AI decisions are logged with model version + confidence
+6. Users can always override AI suggestions with a reason code
+
+Copy
+
+Insert at cursor
+AI Review Queue Pattern
+model AiReviewQueue {
+  id               String   @id @default(uuid())
+  organizationId   String
+  resourceType     String   // 'journal', 'expense', 'invoice'
+  resourceId       String
+  confidenceScore  Int      // 0-100
+  riskLevel        String   // 'low', 'medium', 'high'
+  escalationReason String
+  priorityScore    Int      @default(50)
+  status           String   @default("pending")
+  retryCount       Int      @default(0)
+  leaseExpiresAt   DateTime?
+  processingToken  String?
+  resolvedAt       DateTime?
+  createdAt        DateTime @default(now())
+
+  @@index([organizationId, status])
+  @@index([status, priorityScore])
+}
+
+Copy
+
+Insert at cursor
+prisma
+17. File Uploads & OCR
+Upload Configuration
+// Use multer for file uploads
+// Store locally in dev, S3/R2 in production
+
+const UPLOAD_CONFIG = {
+  maxFileSize: 10 * 1024 * 1024,  // 10MB
+  allowedMimeTypes: [
+    'image/jpeg', 'image/png', 'image/webp',
+    'application/pdf',
+  ],
+  uploadDir: process.env.UPLOAD_DIR ?? './uploads',
+};
+
+// File naming: {timestamp}-{originalname}
+// Never trust client-provided filenames — sanitize always
+const filename = `${Date.now()}-${sanitizeFilename(file.originalname)}`;
+
+Copy
+
+Insert at cursor
+typescript
+OCR Processing Pattern
+// 1. User uploads receipt/invoice image
+// 2. File saved to disk/S3
+// 3. OCR job enqueued
+// 4. Worker calls AI vision API
+// 5. Extracted data returned with confidence scores
+// 6. If confidence < threshold → human review queue
+// 7. User reviews/corrects → approves → posts
+
+interface OcrResult {
+  vendor?: string;
+  invoiceNumber?: string;
+  date?: string;
+  subtotal?: number;
+  taxAmount?: number;
+  total?: number;
+  lineItems?: Array<{ description: string; amount: number }>;
+  confidence: number;       // 0-100
+  riskLevel: 'low' | 'medium' | 'high';
+  rawData: Record<string, unknown>;
+}
+
+Copy
+
+Insert at cursor
+typescript
+18. Email System
+Dual Provider Pattern
+@Injectable()
+export class EmailService {
+  async send(dto: {
+    to: string;
+    subject: string;
+    html: string;
+    text?: string;
+  }) {
+    // Try Resend first, fall back to SMTP
+    try {
+      if (process.env.RESEND_API_KEY) {
+        return await this.sendViaResend(dto);
+      }
+      return await this.sendViaSMTP(dto);
+    } catch (error) {
+      // Log failure, enqueue retry
+      await this.jobQueue.enqueue('retry_email', dto, {
+        maxRetries: 3,
+        delayMs: 60_000,
+      });
+      throw error;
+    }
+  }
+}
+
+Copy
+
+Insert at cursor
+typescript
+Email Templates to Build
+welcome_email           → After registration
+email_verification      → Verify email address
+password_reset          → Reset password link
+team_invite             → Invited to organization
+2fa_backup_codes        → After 2FA setup
+subscription_receipt    → Payment confirmation
+[your domain events]    → Invoice sent, payment received, etc.
+
+Copy
+
+Insert at cursor
+19. Security Hardening
+OWASP Top-10 Checklist
+✅ A01 Broken Access Control
+   → RBAC on every endpoint
+   → Tenant isolation middleware
+   → org_id on every DB query
+
+✅ A02 Cryptographic Failures
+   → bcrypt (cost 10) for passwords
+   → SHA-256 for token storage
+   → AES-256 for sensitive fields
+   → TLS 1.2/1.3 enforced
+
+✅ A03 Injection
+   → Prisma parameterized queries (no raw SQL)
+   → class-validator on all DTOs
+   → whitelist: true on ValidationPipe
+
+✅ A04 Insecure Design
+   → Deny-by-default permissions
+   → Maker-checker for high-value operations
+   → Idempotency keys prevent double-submit
+
+✅ A05 Security Misconfiguration
+   → Helmet security headers
+   → CORS whitelist only
+   → Env validation at startup
+   → No secrets in logs
+
+✅ A06 Vulnerable Components
+   → npm audit in CI/CD
+   → Dependency scan results stored in DB
+   → Automated alerts on critical CVEs
+
+✅ A07 Auth Failures
+   → Rate limiting on auth endpoints
+   → Account lockout after failed attempts
+   → JWT short expiry (15m)
+   → Refresh token rotation
+
+✅ A08 Software Integrity
+   → Hash chain on critical records
+   → Immutable audit logs
+   → DB triggers prevent audit tampering
+
+✅ A09 Logging Failures
+   → All auth events logged
+   → All permission denials logged
+   → Correlation IDs for tracing
+   → Secrets masked in logs
+
+✅ A10 SSRF
+   → Validate all external URLs
+   → Allowlist for webhook destinations
+   → No user-controlled redirects
+
+
+Copy
+
+Insert at cursor
+Secret Masking in Logs
+// config/secret-mask.util.ts
+const SECRET_PATTERNS = [
+  /password[=:]\s*\S+/gi,
+  /token[=:]\s*\S+/gi,
+  /secret[=:]\s*\S+/gi,
+  /Bearer\s+[A-Za-z0-9\-._~+/]+=*/g,
+  /postgresql:\/\/[^@]+@/g,
+];
+
+export function sanitizeErrorMessage(message: string): string {
+  return SECRET_PATTERNS.reduce(
+    (msg, pattern) => msg.replace(pattern, '[REDACTED]'),
+    message
+  );
+}
+
+Copy
+
+Insert at cursor
+typescript
+Security Headers (Helmet)
+app.use(helmet({
+  hsts: process.env.NODE_ENV === 'production'
+    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+    : false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc:  ["'self'"],
+      styleSrc:   ["'self'", "'unsafe-inline'"],
+      imgSrc:     ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'"],
+      objectSrc:  ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  },
+}));
+
+Copy
+
+Insert at cursor
+typescript
+20. Deployment & DevOps
+PM2 Ecosystem Config
+// ecosystem.config.js
+module.exports = {
+  apps: [
+    {
+      name: 'your-saas-backend',
+      cwd: './backend',
+      script: 'dist/main.js',
+      instances: 1,
+      exec_mode: 'fork',
+      env: { NODE_ENV: 'production', PORT: '3001' },
+      max_memory_restart: '500M',
+      error_file: './logs/backend-error.log',
+      out_file:   './logs/backend-out.log',
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+      kill_timeout: 5000,
+      watch: false,
+    },
+    {
+      name: 'your-saas-frontend',
+      cwd: './frontend',
+      script: 'node_modules/next/dist/bin/next',
+      args: 'start --port 3000 --hostname 0.0.0.0',
+      instances: 1,
+      exec_mode: 'fork',
+      env: { NODE_ENV: 'production', PORT: '3000' },
+      max_memory_restart: '500M',
+      error_file: './logs/frontend-error.log',
+      out_file:   './logs/frontend-out.log',
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+      watch: false,
+    },
+  ],
+};
+
+
+Copy
+
+Insert at cursor
+javascript
+Deploy Script Structure
+#!/bin/bash
+# deploy.sh — Unified deployment
+
+set -e
+
+deploy_backend() {
+  cd backend
+  npm install
+  npx prisma generate
+  npx prisma migrate deploy
+  npm run build
+  pm2 restart your-saas-backend || pm2 start ecosystem.config.js --only your-saas-backend
+}
+
+deploy_frontend() {
+  cd frontend
+  npm install
+  npm run build
+  pm2 restart your-saas-frontend || pm2 start ecosystem.config.js --only your-saas-frontend
+}
+
+case "$1" in
+  backend)  deploy_backend  ;;
+  frontend) deploy_frontend ;;
+  *)        deploy_backend && deploy_frontend ;;
+esac
+
+
+Copy
+
+Insert at cursor
+bash
+GitHub Actions CI/CD
+# .github/workflows/ci-cd.yml
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: cd backend && npm ci && npm test
+      - run: cd frontend && npm ci && npm run lint
+
+  deploy:
+    needs: test
+    runs-on: self-hosted        # Your server runner
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./deploy.sh
+
+Copy
+
+Insert at cursor
+yaml
+Health Check Endpoints
+// GET /health        → basic alive check
+// GET /health/live   → liveness probe (is process running?)
+// GET /health/ready  → readiness probe (is DB connected?)
+
+@Controller('health')
+export class HealthController {
+  @Get()
+  check() { return { status: 'ok', timestamp: new Date().toISOString() }; }
+
+  @Get('ready')
+  async ready() {
+    await this.prisma.$queryRaw`SELECT 1`;
+    return { status: 'ready', db: 'connected' };
+  }
+}
+
+Copy
+
+Insert at cursor
+typescript
+Nginx Reverse Proxy Config
+# /etc/nginx/sites-available/your-saas
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com *.yourdomain.com;
+
+    ssl_certificate     /etc/ssl/certs/your-saas.crt;
+    ssl_certificate_key /etc/ssl/private/your-saas.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # Frontend
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Backend API
+    location /api {
+        proxy_pass http://localhost:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDom
+
+
+Copy
+
+Insert at cursor
+nginx
+continue
+
+
+Context
+ains; preload" always;
+add_header X-Frame-Options "DENY" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+}
+
+HTTP → HTTPS redirect
+server {
+listen 80;
+server_name yourdomain.com *.yourdomain.com;
+return 301 https://$host$request_uri;
+}
+
+
+---
+
+## 21. Module Build Order
+
+### Why Order Matters
+
+Copy
+
+Insert at cursor
+Some modules depend on others.
+Build in wrong order = broken imports, missing tables, runtime errors.
+Always follow this sequence.
+
+
+### Phase 1 — Foundation (Build First)
+
+Copy
+
+Insert at cursor
+Database schema (Prisma) → All tables defined
+
+PrismaModule → DB connection
+
+CacheModule → Redis connection
+
+ConfigModule → Env vars loaded
+
+AuditModule → Logging ready (others depend on this)
+
+EmailModule → Email sending ready
+
+
+### Phase 2 — Identity & Access
+
+Copy
+
+Insert at cursor
+IamModule (Users, Roles) → User table + role management
+
+OrganizationsModule → Org table + tenant isolation
+
+AuthModule → JWT + OIDC + 2FA (needs IAM + Org)
+
+TeamModule → Invites + memberships (needs Auth)
+
+
+### Phase 3 — Infrastructure Services
+
+Copy
+
+Insert at cursor
+OutboxModule → Event bus foundation
+
+AsyncJobModule → Background job queue
+
+WorkflowModule → State machine engine
+
+NotificationsModule → Notification center
+
+AttachmentsModule → File upload handling
+
+ExportsModule → PDF/CSV generation
+
+CsvImportModule → Bulk data import
+
+SecurityModule → OWASP controls
+
+PlatformModule → Super-admin governance
+
+HealthModule → Health check endpoints
+
+
+### Phase 4 — AI Services
+
+Copy
+
+Insert at cursor
+AiModule → Provider abstraction
+
+AiApprovalModule → AI approval gate
+
+AiReviewQueueModule → Human review queue
+
+OcrModule → Receipt/document OCR
+
+VoiceModule → Voice-to-text
+
+ClassificationModule → Smart categorization
+
+
+### Phase 5 — Your Business Domain
+
+Copy
+
+Insert at cursor
+[CoreDomainModule] → Your main business entity
+
+[SubDomainModule1] → Related feature 1
+
+[SubDomainModule2] → Related feature 2
+
+ReportsModule → Analytics + reports (needs all above)
+
+
+### Dependency Graph (Simplified)
+
+Copy
+
+Insert at cursor
+PrismaModule
+└── CacheModule
+└── AuditModule
+└── EmailModule
+└── IamModule
+└── OrganizationsModule
+└── AuthModule
+└── TeamModule
+└── OutboxModule
+└── AsyncJobModule
+└── NotificationsModule
+└── WorkflowModule
+└── [YourDomainModules]
+└── ReportsModule
+
+
+---
+
+## 22. SaaS Feature Checklist
+
+### Must-Have (MVP)
+
+Copy
+
+Insert at cursor
+Authentication
+✅ Email + password registration
+✅ Email verification (24h token)
+✅ Login with rate limiting
+✅ JWT access + refresh token rotation
+✅ Password reset flow
+✅ Google OIDC login
+✅ 2FA (TOTP) with backup codes
+✅ Session revocation on password reset
+
+Multi-Tenancy
+✅ Organization creation on signup
+✅ Subdomain per organization
+✅ Tier system (free/premium/enterprise)
+✅ Org status management (active/suspended)
+✅ All queries scoped by organizationId
+
+Team Management
+✅ Invite users by email (7-day token)
+✅ Role assignment (owner/admin/approver/staff/viewer)
+✅ Remove members
+✅ Session revocation on role change
+
+Security
+✅ RBAC on every endpoint
+✅ Helmet security headers
+✅ CORS whitelist
+✅ Input validation (class-validator)
+✅ SQL injection prevention (Prisma)
+✅ Secret masking in logs
+✅ Env validation at startup
+
+Audit
+✅ Immutable audit log
+✅ All auth events logged
+✅ All permission denials logged
+✅ Correlation IDs
+
+Notifications
+✅ In-app notification center
+✅ Email notifications
+✅ Unread count badge
+
+Infrastructure
+✅ Health check endpoints
+✅ Async job queue with retry
+✅ Transactional outbox
+✅ Background job worker
+✅ PM2 process management
+✅ Deploy script
+
+
+### Should-Have (Post-MVP)
+
+Copy
+
+Insert at cursor
+Partner / Referral Program
+⬜ Partner registration + approval
+⬜ Referral code generation
+⬜ Attribution tracking
+⬜ Commission calculation
+⬜ Payout management
+
+Advanced Auth
+⬜ Magic link login
+⬜ SSO / SAML (enterprise)
+⬜ SCIM provisioning
+⬜ Device management UI
+
+Billing
+⬜ Stripe integration
+⬜ Subscription management
+⬜ Usage-based billing
+⬜ Invoice generation
+⬜ Payment webhooks
+
+AI Features
+⬜ AI-assisted data entry
+⬜ Smart classification
+⬜ OCR document processing
+⬜ Voice input
+⬜ AI review queue
+
+Data Management
+⬜ CSV bulk import
+⬜ PDF/CSV export
+⬜ File attachments
+⬜ Data retention policies
+⬜ GDPR data export/delete
+
+Platform Admin
+⬜ Super-admin dashboard
+⬜ Tenant management
+⬜ Platform-wide announcements
+⬜ Dependency vulnerability scanning
+⬜ Break-glass access controls
+
+
+---
+
+## 23. Coding Standards & Rules
+
+### NestJS Rules
+
+```typescript
+// ✅ DO: One responsibility per service method
+async approveInvoice(id: string, userId: string): Promise<Invoice> {
+  // Only approval logic here
+}
+
+// ❌ DON'T: Mix concerns in one method
+async approveInvoiceAndSendEmailAndUpdateDashboard() { ... }
+
+// ✅ DO: Use DTOs for all input validation
+@Post()
+async create(@Body() dto: CreateInvoiceDto) { ... }
+
+// ❌ DON'T: Accept raw objects
+@Post()
+async create(@Body() body: any) { ... }
+
+// ✅ DO: Scope every DB query by organizationId
+const invoices = await this.prisma.invoice.findMany({
+  where: { organizationId, ...filters }
+});
+
+// ❌ DON'T: Query without tenant scope
+const invoices = await this.prisma.invoice.findMany();
+
+// ✅ DO: Use transactions for multi-step operations
+await this.prisma.$transaction(async (tx) => {
+  await tx.invoice.update(...);
+  await tx.outboxMessage.create(...);
+  await tx.auditLog.create(...);
+});
+
+// ❌ DON'T: Multiple separate DB calls for atomic operations
+await this.prisma.invoice.update(...);
+await this.prisma.outboxMessage.create(...); // Can fail independently
+
+
+Copy
+
+Insert at cursor
+TypeScript Rules
+// ✅ DO: Explicit return types on service methods
+async getInvoice(id: string): Promise<Invoice | null> { ... }
+
+// ❌ DON'T: Implicit any
+async getInvoice(id) { ... }
+
+// ✅ DO: Use enums for status values
+enum InvoiceStatus { draft = 'draft', posted = 'posted' }
+
+// ❌ DON'T: Magic strings
+if (invoice.status === 'drft') { ... }  // typo-prone
+
+// ✅ DO: Null checks
+const name = user?.firstName ?? 'Unknown';
+
+// ❌ DON'T: Unsafe access
+const name = user.firstName;  // can throw if user is null
+
+Copy
+
+Insert at cursor
+typescript
+React / Next.js Rules
+// ✅ DO: Use React Query for all server state
+const { data, isLoading, error } = useInvoices();
+
+// ❌ DON'T: useEffect + useState for data fetching
+useEffect(() => { fetch('/api/invoices').then(...) }, []);
+
+// ✅ DO: Handle all query states
+if (isLoading) return <Skeleton />;
+if (error) return <ErrorMessage error={error} />;
+if (!data) return null;
+return <InvoiceList invoices={data} />;
+
+// ❌ DON'T: Render without loading/error states
+return <InvoiceList invoices={data} />;  // data can be undefined
+
+// ✅ DO: Invalidate queries after mutations
+onSuccess: () => {
+  queryClient.invalidateQueries({ queryKey: ['invoices'] });
+}
+
+// ✅ DO: Use cn() for conditional classes
+className={cn('base-class', isActive && 'active-class', isError && 'error-class')}
+
+// ❌ DON'T: String concatenation for classes
+className={'base-class ' + (isActive ? 'active-class' : '')}
+
+
+Copy
+
+Insert at cursor
+typescript
+Database Rules
+✅ Every model has: id (uuid), organizationId, createdAt, updatedAt
+✅ Every organizationId has a DB index
+✅ Unique constraints use @@unique([organizationId, field])
+✅ Soft delete: use deletedAt DateTime? instead of hard delete
+✅ Monetary values: Decimal @db.Decimal(19,4) — never Float
+✅ Dates: always UTC, always DateTime not String
+✅ Enums: defined in Prisma schema, not as plain strings
+✅ Migrations: descriptive names (0001_add_user_2fa_fields)
+✅ No raw SQL unless absolutely necessary
+✅ No N+1 queries — use include/select wisely
+
+Copy
+
+Insert at cursor
+Git Commit Convention
+feat:     New feature
+fix:      Bug fix
+refactor: Code change (no feature/fix)
+perf:     Performance improvement
+security: Security fix
+docs:     Documentation only
+test:     Tests only
+chore:    Build/config changes
+db:       Database schema changes
+
+Examples:
+feat(auth): add Google OIDC login
+fix(invoices): correct tax calculation on credit notes
+security(auth): enforce rate limiting on password reset
+db(users): add 2fa backup codes table
+
+Copy
+
+Insert at cursor
+24. Common Pitfalls to Avoid
+Architecture Pitfalls
+❌ Skipping tenant isolation on even ONE endpoint
+   → Any query without organizationId = data leak between tenants
+
+❌ Publishing events OUTSIDE the DB transaction
+   → App crash between commit and publish = lost events
+   → Always use transactional outbox pattern
+
+❌ Storing raw tokens in DB
+   → Always store SHA-256 hash only
+   → Raw token only travels in HTTP response, never persisted
+
+❌ Hardcoding secrets in source code
+   → Use env vars, validate at startup, mask in logs
+
+❌ Building modules out of order
+   → Auth before IAM = circular dependency hell
+   → Follow the build order in Section 21
+
+❌ Skipping idempotency on mutations
+   → Network retry = duplicate invoice/charge/email
+   → Always accept and check idempotencyKey
+
+❌ Using Float for money
+   → Float arithmetic errors: 0.1 + 0.2 = 0.30000000000000004
+   → Always use Decimal(19,4)
+
+
+Copy
+
+Insert at cursor
+Security Pitfalls
+❌ Logging request bodies
+   → Bodies may contain passwords, tokens, card numbers
+   → Log only method + path + status + duration
+
+❌ Returning stack traces in production
+   → Exposes internal structure to attackers
+   → Return generic message in prod, full error in dev only
+
+❌ Trusting client-provided organizationId
+   → Always read organizationId from JWT, never from request body
+
+❌ Skipping email verification
+   → Allows anyone to register with someone else's email
+   → Always verify before granting access
+
+❌ Not revoking sessions on password reset
+   → Attacker who stole session keeps access after password change
+   → Always revoke ALL refresh tokens on password reset
+
+❌ Weak JWT secrets
+   → Short secrets = brute-forceable
+   → Minimum 64 hex chars (256 bits) for both access + refresh secrets
+
+Copy
+
+Insert at cursor
+Performance Pitfalls
+❌ N+1 queries in loops
+   → for (const user of users) { await getOrg(user.orgId) }
+   → Use Prisma include or batch queries
+
+❌ No pagination on list endpoints
+   → Returning 10,000 records crashes the app
+   → Always paginate: default limit 20, max 100
+
+❌ No DB indexes on foreign keys
+   → Every organizationId, userId, status field needs an index
+   → Prisma @@index([organizationId]) on every model
+
+❌ Blocking the event loop with sync operations
+   → Never use fs.readFileSync, crypto.pbkdfSync in request handlers
+   → Use async versions always
+
+❌ No query timeout
+   → Slow DB query blocks all requests
+   → Set statement_timeout in PostgreSQL connection
+
+Copy
+
+Insert at cursor
+Frontend Pitfalls
+❌ Storing sensitive data in localStorage
+   → Access tokens in localStorage = XSS vulnerable
+   → Use httpOnly cookies for refresh tokens
+   → Access tokens in memory or localStorage (short-lived = acceptable)
+
+❌ No loading states
+   → User clicks button twice = double submission
+   → Always disable buttons during mutation isPending
+
+❌ No error boundaries
+   → One component crash = blank white page
+   → Wrap feature sections in ErrorBoundary
+
+❌ Fetching data in useEffect
+   → Race conditions, no caching, no deduplication
+   → Always use TanStack Query
+
+❌ Hydration mismatches
+   → Reading localStorage/window on server = hydration error
+   → Use useEffect or mounted state guard for client-only reads
+
+Copy
+
+Insert at cursor
+Quick Reference — Start a New SaaS
+Step 1: Copy Structure
+cp -r this-blueprint/ your-new-saas/
+cd your-new-saas
+
+Copy
+
+Insert at cursor
+bash
+Step 2: Replace These Everywhere
+OraBooks     → YourAppName
+orabooks     → yourappname
+orabtqjn     → your_db_user
+orabooks.online → yourdomain.com
+
+Copy
+
+Insert at cursor
+Step 3: Generate Secrets
+# JWT secrets (run twice for access + refresh)
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+
+# Encryption key
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+# Internal API key
+node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
+
+Copy
+
+Insert at cursor
+bash
+Step 4: Build in Order
+1. Define your Prisma schema (add your domain models)
+2. Run: npx prisma migrate dev --name init
+3. Build Phase 1-3 modules (foundation + identity + infra)
+4. Build your domain modules
+5. Build reports/analytics last
+
+Copy
+
+Insert at cursor
+Step 5: Pre-Launch Security Checklist
+✅ All env vars validated at startup
+✅ No secrets in git history
+✅ Rate limiting on auth endpoints
+✅ CORS whitelist set to production domain only
+✅ Helmet headers enabled
+✅ HTTPS enforced (TLS or Nginx)
+✅ DB connection uses SSL
+✅ npm audit passes (no critical CVEs)
+✅ All endpoints require authentication (except public ones)
+✅ All endpoints scoped by organizationId
+✅ Audit logging enabled
+✅ Health checks responding
+✅ PM2 autorestart configured
+✅ Logs directory writable
+✅ Backup strategy in place
+
+Copy
+
+Insert at cursor
+Appendix — Key File Templates
+prisma.service.ts
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit {
+  async onModuleInit() {
+    await this.$connect();
+  }
+
+  async onModuleDestroy() {
+    await this.$disconnect();
+  }
+}
+
+Copy
+
+Insert at cursor
+typescript
+Standard Controller Template
+@ApiTags('your-resource')
+@ApiBearerAuth('jwt')
+@UseGuards(JwtAuthGuard)
+@Controller('your-resource')
+export class YourResourceController {
+  constructor(private readonly service: YourResourceService) {}
+
+  @Get()
+  @RequirePermission('view_resource')
+  findAll(@CurrentOrg() orgId: string, @Query() query: ListQueryDto) {
+    return this.service.findAll(orgId, query);
+  }
+
+  @Get(':id')
+  @RequirePermission('view_resource')
+  findOne(@CurrentOrg() orgId: string, @Param('id') id: string) {
+    return this.service.findOne(orgId, id);
+  }
+
+  @Post()
+  @RequirePermission('create_resource')
+  create(@CurrentOrg() orgId: string, @CurrentUser() userId: string, @Body() dto: CreateDto) {
+    return this.service.create(orgId, userId, dto);
+  }
+
+  @Patch(':id')
+  @RequirePermission('edit_resource')
+  update(@CurrentOrg() orgId: string, @Param('id') id: string, @Body() dto: UpdateDto) {
+    return this.service.update(orgId, id, dto);
+  }
+
+  @Delete(':id')
+  @RequirePermission('delete_resource')
+  remove(@CurrentOrg() orgId: string, @Param('id') id: string) {
+    return this.service.remove(orgId, id);
+  }
+
+  @Post(':id/approve')
+  @RequirePermission('approve_resource')
+  approve(@CurrentOrg() orgId: string, @CurrentUser() userId: string, @Param('id') id: string) {
+    return this.service.approve(orgId, id, userId);
+  }
+}
+
+
+Copy
+
+Insert at cursor
+typescript
+Standard Service Template
+@Injectable()
+export class YourResourceService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
+  ) {}
+
+  async findAll(organizationId: string, query: ListQueryDto) {
+    const { page = 1, limit = 20 } = query;
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.yourResource.findMany({
+        where: { organizationId },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.yourResource.count({ where: { organizationId } }),
+    ]);
+    return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async findOne(organizationId: string, id: string) {
+    const item = await this.prisma.yourResource.findFirst({
+      where: { id, organizationId },  // ALWAYS include organizationId
+    });
+    if (!item) throw new NotFoundException('Resource not found');
+    return item;
+  }
+
+  async create(organizationId: string, userId: string, dto: CreateDto) {
+    const item = await this.prisma.yourResource.create({
+      data: { ...dto, organizationId, createdBy: userId },
+    });
+
+    await this.audit.log({
+      organizationId,
+      userId,
+      eventType: 'resource.created',
+      description: `Created resource ${item.id}`,
+      metadata: { resourceId: item.id },
+    });
+
+    return item;
+  }
+
+  async approve(organizationId: string, id: string, userId: string) {
+    const item = await this.findOne(organizationId, id);
+
+    if (item.status !== 'submitted') {
+      throw new BadRequestException('Only submitted items can be approved');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.yourResource.update({
+        where: { id },
+        data: { status: 'approved', approvedBy: userId, approvedAt: new Date() },
+      });
+
+      await tx.outboxMessage.create({
+        data: {
+          eventType: 'resource.approved',
+          aggregateId: id,
+          payload: { resourceId: id, organizationId, approvedBy: userId },
+          status: 'pending',
+        },
+      });
+
+      return result;
+    });
+
+    await this.audit.log({
+      organizationId,
+      userId,
+      eventType: 'resource.approved',
+      description: `Approved resource ${id}`,
+    });
+
+    return updated;
+  }
+}
+
+
+Copy
+
+Insert at cursor
+typescript
+This blueprint is battle-tested from a production SaaS with 30+ modules,
+multi-tenancy, AI integration, partner program, and full audit compliance.
+
+Replace domain logic. Keep the architecture. Ship faster.
+
+
+---
+
+এই পুরো content টা copy করে `master_saas.md` নামে তোমার project root-এ save করো। এটা হলো তোমার OraBooks project থেকে extract করা সম্পূর্ণ A-to-Z SaaS blueprint — যেকোনো নতুন SaaS এই structure follow করে বানানো যাবে।
+
+**Blueprint-এ কী কী আছে:**
+- সম্পূর্ণ folder structure
+- Tech stack সব layer-এর জন্য
+- Environment & secrets management
+- NestJS bootstrap pattern
+- Prisma schema patterns
+- Auth flow (JWT + OIDC + 2FA)
+- Multi-tenancy architecture
+- RBAC permission system
+- API standards & pagination
+- Frontend architecture
+- TanStack Query patterns
+- Event-driven outbox pattern
+- Async job queue
+- Notification system
+- Audit & compliance
+- AI integration governance
+- Security hardening (OWASP)
+- Deployment (PM2 + Nginx)
+- Module build order
+- SaaS feature checklist
+- Coding standards
+- Common pitfalls
+- Ready-to-use code templates
+
+
+Copy
+
+Insert at cursor
+continue
+
+
+Context
+তুমি কি আরো কিছু add করতে চাও blueprint-এ? নাকি এটা complete মনে হচ্ছে?
+
+Blueprint টা এখন পুরোপুরি ready — সব major section cover করা হয়েছে:
+
+যা already আছে:
+
+Section 1-24 সব complete
+
+Code templates (controller, service, prisma, api-client)
+
+Security checklist
+
+Deploy scripts
+
+Quick start guide
+
+যদি আরো চাও, বলো কোনটা:
+
+Stripe billing integration pattern
+
+WebSocket / real-time notifications
+
+Redis caching strategies
+
+Database backup & restore scripts
+
+Docker / docker-compose setup
+
+Monitoring (Prometheus + Grafana)
+
+Error tracking (Sentry integration)
+
+Feature flags system
+
+Webhook system pattern
+
+API versioning strategy
+
+কোনটা দরকার বলো, add করে দিচ্ছি।
+
+Compact chat history?
+
+Allowed
+The context window is almost full (72%) and exceeding it will clear your history. Amazon Q can compact your history instead.
+
+Compacting your chat history, this may take a moment.
+
+Conversation Summary
+Project Analysis : User asked to fully analyze the OraBooks project (a production-grade accounting SaaS) and create a master_saas.md blueprint file that any developer can use to build a new SaaS using the same architecture — NOT copying OraBooks functionality, just the structure/patterns.
+
+Blueprint Creation : A comprehensive master_saas.md was written covering 24 sections with code templates, architecture patterns, security checklists, and deployment guides extracted from OraBooks.
+
+Files and Code Summary
+Project Root : \\10.124.1.254\Jahid_ Shared_Folder\Project Share Folder\Lean MVP OraBooks\ — monorepo with backend/, frontend/, packages/, .github/, deploy scripts
+
+backend/src/main.ts : NestJS bootstrap — loadAndValidateSecrets() first, TLS options, global prefix, Swagger, Helmet, CORS, ValidationPipe, HttpExceptionFilter, LoggingInterceptor, ResponseTransformInterceptor
+
+backend/src/app.module.ts : 35+ modules imported, HttpsRedirectMiddleware + RequireCustomerOrgMiddleware applied via configure()
+
+backend/package.json : NestJS 11, Prisma 7, PostgreSQL, Redis (ioredis), JWT, Passport, bcryptjs, otplib, Resend, Helmet, class-validator
+
+frontend/package.json : Next.js 16, TanStack Query v5, React Hook Form + Zod, Axios, Tailwind CSS 4, shadcn/ui, Lucide React, PWA
+
+backend/prisma/schema.prisma : Full schema — User, Organization, Membership, RefreshToken, AuditLog, Journal, Invoice, Bill, Expense, Vendor, Customer, Inventory, BankAccount, Notification, AsyncJob, OutboxMessage, CsvImport, VoiceInput, AiReviewQueue, ReportSnapshot, and 50+ more models
+
+backend/src/config/env.validation.ts : class-validator DTO validating all env vars at startup — PORT, JWT secrets, DATABASE_URL, ENCRYPTION_KEY, CORS_ORIGIN required; AI keys, SMTP, TLS optional
+
+backend/src/common/filters/http-exception.filter.ts : Global exception filter — sanitizes error messages, returns { success, error: { statusCode, message, path, timestamp } }
+
+backend/src/common/interceptors/logging.interceptor.ts : Logs method+path+status+ms only, strips query params and auth headers
+
+frontend/src/lib/api-client.ts : Axios instance with Bearer token injection, response unwrapping { success, data }→data, 401 auto-refresh with queue, 403 global event dispatch
+
+frontend/src/app/(dashboard)/layout.tsx : Full sidebar with NAV_GROUPS, RBAC filtering via usePermissions(), partner org gating, collapsible sidebar, mobile drawer, NotificationBell, ProfileDropdown, VoiceRecorder FAB, ThemeSwitcher, SessionTracker clock
+
+backend/src/modules/auth/auth.module.ts : JWT + Passport + OIDC strategy, RateLimitGuard middleware on auth routes
+
+deploy.sh : Unified deploy script — auto-detects PM2/Passenger/direct, git pull, npm install, prisma migrate deploy, build, start
+
+ecosystem.config.js : PM2 config for orabooks-backend (port 3001) and orabooks-frontend (port 3000), 500MB memory limit, autorestart
+
+master_development_plan.md : Detailed SL (Sprint Level) developer drafts — SL-001 through SL-250+, build orders, state machines, UI components, backend actions per feature
+
+Key Insights
+USER GOAL : Create master_saas.md — a reusable SaaS architecture blueprint based on OraBooks patterns, NOT copying OraBooks functionality
+
+LANGUAGE : User writes in Bengali/Banglish, responses should match
+
+MODE : agentic-coding OFF — cannot write files, only provide content for user to copy
+
+ARCHITECTURE : Multi-tenant SaaS with subdomain-per-org, RBAC (owner/admin/approver/staff/viewer), JWT+OIDC+2FA auth, transactional outbox pattern, async job queue, immutable audit logs
+
+TECH STACK : NestJS 11 + Prisma 7 + PostgreSQL + Redis backend; Next.js 16 App Router + TanStack Query + Tailwind frontend
+
+SECURITY : Secrets validated at startup, tokens stored as SHA-256 hash, OWASP Top-10 implemented, Helmet headers, rate limiting on auth
+
+MULTI-TENANCY : Every DB query scoped by organizationId, org types: customer/partner/platform, tier: free/premium/enterprise/partner
+
+BUILD ORDER : Foundation → Identity/Auth → Infrastructure Services → AI → Domain Modules → Reports
+
+Most Recent Topic
+Topic : Creating master_saas.md — a complete SaaS blueprint extracted from OraBooks
+
+Progress : The full blueprint was written across multiple responses covering all 24 sections:
+
+Project Structure (full folder tree)
+
+Tech Stack (backend + frontend tables)
+
+Environment & Secrets (all required vars + generation commands)
+
+Backend Architecture (main.ts pattern, module structure, response shapes)
+
+Database Architecture (Prisma patterns, core models, migration rules)
+
+Authentication & Authorization (full auth flow, password policy, rate limits, OIDC)
+
+Multi-Tenancy (isolation middleware, org types, status state machine, subdomain rules)
+
+RBAC (roles, permission matrix, guard implementation, JWT payload)
+
+API Standards (URL conventions, pagination, DTO validation, idempotency)
+
+Frontend Architecture (route groups, auth guard, sidebar nav pattern)
+
+State Management (TanStack Query hooks, API function pattern, permissions hook)
+
+Event-Driven Architecture (transactional outbox, outbox worker, domain events)
+
+Async Job Queue (model, worker with SKIP LOCKED, backoff, enqueue helper)
+
+Notification System (model, service pattern)
+
+Audit & Compliance (DB triggers for immutability, audit service, mandatory events)
+
+AI Integration (provider abstraction, governance rules, review queue)
+
+File Uploads & OCR (multer config, OCR result interface)
+
+Email System (dual provider pattern, template list)
+
+Security Hardening (OWASP checklist, secret masking, Helmet config)
+
+Deployment (PM2 config, deploy script, GitHub Actions, health checks, Nginx config)
+
+Module Build Order (5 phases with dependency graph)
+
+SaaS Feature Checklist (must-have MVP + should-have post-MVP)
+
+Coding Standards (NestJS, TypeScript, React, DB rules, git conventions)
+
+Common Pitfalls (architecture, security, performance, frontend)
+
+Appendix with key file templates (PrismaService, Controller template, Service template)
+
+Tools Used :
+
+listDirectory : Scanned full project tree at depth 3 — identified monorepo structure with 35+ backend modules
+
+fsRead (batch 1) : Read main.ts, app.module.ts, backend/package.json, frontend/package.json
+
+fsRead (batch 2) : Read prisma/schema.prisma (full, ~3000 lines), master_development_plan.md (truncated at 200K chars)
+
+fsRead (batch 3) : Read dashboard layout.tsx, auth.module.ts, deploy.sh, ecosystem.config.js
+
+fsRead (batch 4) : Read http-exception.filter.ts, logging.interceptor.ts, env.validation.ts, api-client.ts
